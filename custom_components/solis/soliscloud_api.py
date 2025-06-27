@@ -448,7 +448,7 @@ class SoliscloudAPI(BaseAPI):
         if result[SUCCESS] is True:
             result_json: dict = result[CONTENT]
             if result_json['code'] != '0':
-                _LOGGER.info("%s responded with error: %s:%s",INVERTER_DETAIL_LIST, \
+                _LOGGER.info("%s responded with error: %s:%s",INVERTER_DETAIL, \
                     result_json['code'], result_json['msg'])
                 return device_ids
             try:
@@ -459,7 +459,7 @@ class SoliscloudAPI(BaseAPI):
                         
                         # Changes THIJS - fix https://github.com/hultenvp/solis-sensor/issues/354
                         # Set batteryToday(Di)ChargeEnergy from inverterList (0.1 precision) instead of inverterDetailList (= whole numbers) - fix #354
-                        attributes = INVERTER_DATA[INVERTER_DETAIL_LIST]
+                        attributes = INVERTER_DATA[INVERTER_DETAIL]
                         for dictkey in [BAT_DAILY_ENERGY_CHARGED, BAT_DAILY_ENERGY_DISCHARGED]:
                             key = attributes[dictkey][0]
                             type_ = attributes[dictkey][1]
