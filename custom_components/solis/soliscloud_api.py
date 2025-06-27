@@ -197,8 +197,8 @@ INVERTER_DATA: InverterDataType = {
         GRID_YEARLY_ON_GRID_ENERGY_STR: ["gridSellYearEnergyStr", str, None],
         GRID_DAILY_ON_GRID_ENERGY: ["gridSellDayEnergy", float, 3],
         GRID_DAILY_ON_GRID_ENERGY_STR: ["gridSellDayEnergyStr", str, None],
-        GRID_DAILY_ENERGY_USED: ["homeLoadEnergy", float, 3],
-        GRID_DAILY_ENERGY_USED_STR: ["homeLoadEnergyStr", str, None],
+        GRID_DAILY_ENERGY_USED: ["homeLoadTodayEnergy", float, 3],
+        GRID_DAILY_ENERGY_USED_STR: ["homeLoadTodayEnergyStr", str, None],
         PLANT_TOTAL_CONSUMPTION_POWER: ["familyLoadPower", float, 3],
         PLANT_TOTAL_CONSUMPTION_POWER_STR: ["familyLoadPowerStr", str, None],
     },
@@ -385,6 +385,8 @@ class SoliscloudAPI(BaseAPI):
                 await asyncio.sleep(1)
                 payload = await self._get_inverter_details(device_id, inverter_serial)
                 await asyncio.sleep(1)
+                payload2 = await self._get_inverter_bat_daily_energy(self.config.plant_id, device_id, inverter_serial)
+                await asyncio.sleep(1)
                 payload_detail = await self._get_station_details(self.config.plant_id)
                 if payload is not None:
                     # _LOGGER.debug("%s", payload)
@@ -430,6 +432,59 @@ class SoliscloudAPI(BaseAPI):
             _LOGGER.info("Unable to fetch details for device with ID: %s", device_id)
         return jsondata
 
+    async def _get_inverter_bat_daily_energy(self, plant_id: str,
+        device_id: str,
+        device_serial: str
+    ) -> dict[str, Any] | None:
+        """
+        Update inverter details: bat_daily_energy
+        """
+
+        params = {
+            'stationId': plant_id
+        }
+        result = await self._post_data_json('/v1/api/inverterList', params)
+
+        if result[SUCCESS] is True:
+            result_json: dict = result[CONTENT]
+            if result_json['code'] != '0':
+                _LOGGER.info("%s responded with error: %s:%s",INVERTER_DETAIL_LIST, \
+                    result_json['code'], result_json['msg'])
+                return device_ids
+            try:
+                for record in result_json['data']['page']['records']:
+                    record_serial = record.get('sn')
+                    record_device_id = record.get('id')
+                    if record_device_id == device_id and record_serial == device_serial:
+                        
+                        # Changes THIJS - fix https://github.com/hultenvp/solis-sensor/issues/354
+                        # Set batteryToday(Di)ChargeEnergy from inverterList (0.1 precision) instead of inverterDetailList (= whole numbers) - fix #354
+                        attributes = INVERTER_DATA[INVERTER_DETAIL_LIST]
+                        for dictkey in [BAT_DAILY_ENERGY_CHARGED, BAT_DAILY_ENERGY_DISCHARGED]:
+                            key = attributes[dictkey][0]
+                            type_ = attributes[dictkey][1]
+                            precision = attributes[dictkey][2]
+                            if key is not None:
+                                value = self._get_value(record, key, type_, precision)
+                                if value is not None:
+                                    self._data[dictkey] = value
+                        
+                        # Changes THIJS - fix Today consumption / Daily grid energy
+                        attributes = INVERTER_DATA[PLANT_DETAIL]
+                        for dictkey in [GRID_DAILY_ENERGY_USED]:
+                            key = attributes[dictkey][0]
+                            type_ = attributes[dictkey][1]
+                            precision = attributes[dictkey][2]
+                            if key is not None:
+                                value = self._get_value(record, key, type_, precision)
+                                if value is not None:
+                                    self._data[dictkey] = value
+                        
+                        return record
+            except TypeError:
+                _LOGGER.debug("Response contains unexpected data: %s", result_json)
+        return None
+
     def _collect_inverter_data(self, payload: dict[str, Any]) -> None:
         """Fetch dynamic properties"""
         jsondata = payload["data"]
@@ -448,7 +503,11 @@ class SoliscloudAPI(BaseAPI):
             precision = attributes[dictkey][2]
             if key is not None:
                 value = None
-                if dictkey != INVERTER_ENERGY_TODAY or collect_energy_today:
+                
+                # Changes THIJS - fix https://github.com/hultenvp/solis-sensor/issues/354
+                if ((dictkey != INVERTER_ENERGY_TODAY or collect_energy_today)
+                    and (dictkey != BAT_DAILY_ENERGY_CHARGED)       # Set from inverterList (0.1 precision) - fix #354
+                    and (dictkey != BAT_DAILY_ENERGY_DISCHARGED)):  # Set from inverterList (0.1 precision) - fix #354
                     value = self._get_value(jsondata, key, type_, precision)
                 if value is not None:
                     self._data[dictkey] = value
@@ -574,7 +633,8 @@ class SoliscloudAPI(BaseAPI):
             precision = attributes[dictkey][2]
             if key is not None:
                 value = None
-                if dictkey != INVERTER_ENERGY_TODAY or collect_energy_today:
+                if ((dictkey != INVERTER_ENERGY_TODAY or collect_energy_today)
+                    and (dictkey != GRID_DAILY_ENERGY_USED)):       # Thijs
                     value = self._get_value(jsondata, key, type_, precision)
                 if value is not None:
                     self._data[dictkey] = value
